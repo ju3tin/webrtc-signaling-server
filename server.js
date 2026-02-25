@@ -1,7 +1,21 @@
 const WebSocket = require("ws");
 const http = require("http");
 
-const server = http.createServer();
+// Create HTTP server
+const server = http.createServer((req, res) => {
+  // Simple GET API
+  if (req.method === "GET" && req.url === "/") {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("Page Working");
+    return;
+  }
+
+  // Optional: 404 for other paths
+  res.writeHead(404, { "Content-Type": "text/plain" });
+  res.end("Not Found");
+});
+
+// WebSocket server using the same HTTP server
 const wss = new WebSocket.Server({ server });
 
 const rooms = new Map();
@@ -23,7 +37,7 @@ wss.on("connection", (ws) => {
 
     rooms.get(room).add(ws);
 
-    // Relay to other clients in room
+    // Relay to other clients in the room
     rooms.get(room).forEach(client => {
       if (client !== ws && client.readyState === WebSocket.OPEN) {
         client.send(JSON.stringify({ type, payload }));
@@ -40,5 +54,6 @@ wss.on("connection", (ws) => {
   });
 });
 
+// Listen on the port
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => console.log(`Signaling server running on port ${PORT}`));
