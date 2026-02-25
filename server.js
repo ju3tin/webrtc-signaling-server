@@ -11,7 +11,6 @@ wss.on("connection", (ws) => {
 
   ws.on("message", (message) => {
     let data;
-
     try {
       data = JSON.parse(message);
     } catch {
@@ -20,9 +19,7 @@ wss.on("connection", (ws) => {
 
     const { room, type, payload } = data;
 
-    if (!rooms.has(room)) {
-      rooms.set(room, new Set());
-    }
+    if (!rooms.has(room)) rooms.set(room, new Set());
 
     rooms.get(room).add(ws);
 
@@ -36,18 +33,12 @@ wss.on("connection", (ws) => {
 
   ws.on("close", () => {
     console.log("Client disconnected");
-
     rooms.forEach((clients, room) => {
       clients.delete(ws);
-      if (clients.size === 0) {
-        rooms.delete(room);
-      }
+      if (clients.size === 0) rooms.delete(room);
     });
   });
 });
 
-const PORT = 8080;
-
-server.listen(PORT, () => {
-  console.log(`Signaling server running on ws://localhost:${PORT}`);
-});
+const PORT = process.env.PORT || 8080;
+server.listen(PORT, () => console.log(`Signaling server running on port ${PORT}`));
