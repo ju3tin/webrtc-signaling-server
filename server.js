@@ -1,64 +1,54 @@
 const WebSocket = require("ws");
 const http = require("http");
 
-// Create HTTP server (optional, can serve static files if needed)
+// Optional HTTP server
 const server = http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain" });
   res.end("WebSocket server running");
 });
 
-// WebSocket server
 const wss = new WebSocket.Server({ server });
 
-// Rooms: Map roomId => Array of clients
+// roomId => array of clients
 const rooms = new Map();
 
 wss.on("connection", (ws) => {
   console.log("Client connected");
 
-  ws.on("message", (message) => {
+  ws.on("message", (msg) => {
     let data;
-    try {
-      data = JSON.parse(message);
-    } catch (err) {
-      console.error("Invalid JSON:", message);
-      return;
-    }
+    try { data = JSON.parse(msg); } 
+    catch { console.warn("Invalid JSON:", msg); return; }
 
     const { type, room, payload } = data;
-
     if (!room) {
-      ws.send(JSON.stringify({ type: "error", payload: "Room ID required" }));
+      ws.send(JSON.stringify({ type:"error", payload:"Room ID required"}));
       return;
     }
 
-    // CREATE / JOIN ROOM
+    // JOIN ROOM
     if (type === "join") {
       if (!rooms.has(room)) rooms.set(room, []);
-
       const clients = rooms.get(room);
 
       if (clients.length >= 2) {
-        ws.send(JSON.stringify({ type: "error", payload: "Room full (2 players max)" }));
+        ws.send(JSON.stringify({ type:"error", payload:"Room full"}));
+        console.log(`Room ${room} is full`);
         return;
       }
 
-      // Assign role: first client = 1, second = 2
       const role = clients.length + 1;
       ws.role = role;
+      ws.room = room;
       clients.push(ws);
 
+      ws.send(JSON.stringify({ type:"joined", payload:{ room, role } }));
       console.log(`Client joined room ${room} as role ${role}`);
 
-      // Tell this client its role
-      ws.send(JSON.stringify({ type: "joined", payload: { room, role } }));
-
-      // If room has 2 clients now, notify both they are ready
       if (clients.length === 2) {
-        clients.forEach(c => c.send(JSON.stringify({ type: "ready" })));
+        clients.forEach(c => c.send(JSON.stringify({ type:"ready" })));
         console.log(`Room ${room} ready! Game can start`);
       }
-
       return;
     }
 
@@ -67,35 +57,32 @@ wss.on("connection", (ws) => {
       const clients = rooms.get(room);
       if (!clients) return;
 
-      clients.forEach(client => {
-        if (client !== ws && client.readyState === WebSocket.OPEN) {
-          client.send(JSON.stringify({ type: "input", payload }));
+      clients.forEach(c => {
+        if (c !== ws && c.readyState === WebSocket.OPEN) {
+          c.send(JSON.stringify({ type:"input", payload }));
         }
       });
+      console.log(`Input relayed from role ${ws.role} in room ${room}:`, payload);
       return;
     }
   });
 
   ws.on("close", () => {
     console.log("Client disconnected");
+    if (!ws.room) return;
 
-    // Remove client from any room
-    for (const [roomId, clients] of rooms.entries()) {
-      const index = clients.indexOf(ws);
-      if (index !== -1) {
-        clients.splice(index, 1);
-        console.log(`Removed client from room ${roomId}`);
-        // If room is empty, delete it
-        if (clients.length === 0) rooms.delete(roomId);
-      }
-    }
+    const clients = rooms.get(ws.room);
+    if (!clients) return;
+
+    const index = clients.indexOf(ws);
+    if (index !== -1) clients.splice(index, 1);
+
+    if (clients.length === 0) rooms.delete(ws.room);
+    console.log(`Client removed from room ${ws.room}`);
   });
 
-  ws.on("error", (err) => {
-    console.error("WebSocket error:", err);
-  });
+  ws.on("error", (err) => console.error("Socket error:", err));
 });
 
-// Listen on port
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => console.log(`WebSocket server running on port ${PORT}`));
