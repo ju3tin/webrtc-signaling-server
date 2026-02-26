@@ -10,7 +10,6 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "gh": "^2.8.9",
     "ws": "^8.19.0"
   }
 }
