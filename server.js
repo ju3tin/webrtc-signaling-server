@@ -1,151 +1,105 @@
 const WebSocket = require("ws");
 const http = require("http");
 
-// ======================
-// HTTP SERVER (for status)
-// ======================
-const server = http.createServer((req, res) => {
-  if (req.method === "GET") {
-    if (req.url === "/") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ status: "Server running" }));
-      return;
-    }
-    if (req.url === "/status") {
-      let roomCount = rooms.size;
-      let clientCount = 0;
-      rooms.forEach(clients => clientCount += clients.size);
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ rooms: roomCount, clients: clientCount }));
-      return;
-    }
-  }
-
-  res.writeHead(404);
-  res.end("Not Found");
-});
-
-// ======================
-// WEBSOCKET SERVER
-// ======================
+const server = http.createServer();
 const wss = new WebSocket.Server({ server });
-const rooms = new Map();
 
-// ======================
-// CONSTANTS
-// ======================
-const CANVAS_WIDTH = 900;
-const PLAYER_WIDTH = 80;
-const PLAYER_HEIGHT = 120;
-const MOVE_SPEED = 5;
-const PUNCH_RANGE = 50;
-const MAX_HP = 100;
+const rooms = new Map(); // roomId -> { clients: [], state }
 
-// ======================
-// PLAYER STATE TEMPLATE
-// ======================
-function createPlayer(role){
-  return {
-    x: role === 1 ? 150 : 650,
-    y: 350,
-    hp: MAX_HP,
-    role,
-    punching: false,
-    facing: role === 1 ? 1 : -1
-  };
-}
-
-// ======================
-// HANDLE CONNECTION
-// ======================
-wss.on("connection", (ws) => {
+wss.on("connection", ws => {
   console.log("Client connected");
 
-  ws.on("message", (msg) => {
+  ws.on("message", message => {
     let data;
-    try { data = JSON.parse(msg); } 
-    catch { return; }
+    try { data = JSON.parse(message); } catch { return; }
 
     const { type, room, payload } = data;
-    if(!room) {
-      ws.send(JSON.stringify({type:"error", payload:"Room ID required"}));
-      return;
-    }
+    if (!room) return ws.send(JSON.stringify({ type:"error", payload:"Room ID required" }));
 
-    if(!rooms.has(room)) rooms.set(room, new Map());
-    const clients = rooms.get(room);
-
-    // Add player to room
-    if(!clients.has(ws)){
-      if(clients.size >= 2){
-        ws.send(JSON.stringify({type:"error", payload:"Room full"}));
-        return;
-      }
-      const role = clients.size + 1;
-      clients.set(ws, createPlayer(role));
-      ws.send(JSON.stringify({type:"joined", payload:{role}}));
-
-      if(clients.size === 2){
-        // Notify both players ready
-        clients.forEach((playerWs) => {
-          playerWs.send(JSON.stringify({type:"ready"}));
-        });
-      }
-    }
-
-    const player = clients.get(ws);
-    const opponent = Array.from(clients.values()).find(p => p !== player);
-
-    // ======================
-    // HANDLE INPUT
-    // ======================
-    if(type === "input" && payload){
-      // Movement
-      if(payload.left) player.x -= MOVE_SPEED;
-      if(payload.right) player.x += MOVE_SPEED;
-
-      // Clamp positions
-      player.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, player.x));
-
-      // Facing
-      if(opponent){
-        player.facing = player.x < opponent.x ? 1 : -1;
-      }
-
-      // Punch
-      player.punching = payload.punch;
-
-      // Hit detection
-      if(player.punching && opponent){
-        const distance = Math.abs((player.x + (player.facing === 1 ? PLAYER_WIDTH : 0)) - (opponent.x + PLAYER_WIDTH/2));
-        if(distance <= PUNCH_RANGE){
-          opponent.hp = Math.max(0, opponent.hp - 1); // damage 1 per hit
-          console.log(`💥 Player ${player.role} hit Player ${opponent.role} | HP: ${opponent.hp}`);
-        }
-      }
-
-      // Broadcast updated state
-      const state = {};
-      clients.forEach((p, cws)=>state[p.role] = {...p});
-      clients.forEach(cws=>{
-        if(cws.readyState === WebSocket.OPEN){
-          cws.send(JSON.stringify({type:"state", payload:state}));
+    // Create room if missing
+    if (!rooms.has(room)) {
+      rooms.set(room, {
+        clients: [],
+        state: {
+          1: { x:150, y:350, hp:100, facing:1, punching:false },
+          2: { x:650, y:350, hp:100, facing:-1, punching:false },
+          score: {1:0, 2:0},
+          round: 1
         }
       });
     }
+
+    const roomObj = rooms.get(room);
+
+    // Add client to room
+    if(!roomObj.clients.includes(ws) && roomObj.clients.length < 2){
+      roomObj.clients.push(ws);
+      const role = roomObj.clients.indexOf(ws) + 1;
+      ws.send(JSON.stringify({ type:"joined", payload:{ role } }));
+
+      // If 2 players, notify ready
+      if(roomObj.clients.length === 2){
+        roomObj.clients.forEach(c => c.send(JSON.stringify({ type:"ready" })));
+      }
+    }
+
+    // Handle player input
+    if(type === "input"){
+      const playerId = roomObj.clients.indexOf(ws) + 1;
+      if(playerId === 0) return; // unknown player
+      const p = roomObj.state[playerId];
+      const otherId = playerId === 1 ? 2 : 1;
+      const other = roomObj.state[otherId];
+
+      // Movement
+      if(payload.left) p.x -= 5;
+      if(payload.right) p.x += 5;
+
+      // Punch
+      if(payload.punch) {
+        p.punching = true;
+
+        // Check hit
+        const hitRange = 80;
+        if(p.facing === 1 && p.x + 80 >= other.x && p.x + 80 <= other.x + 80) {
+          other.hp = Math.max(0, other.hp-1);
+        } else if(p.facing === -1 && p.x <= other.x + 80 && p.x >= other.x) {
+          other.hp = Math.max(0, other.hp-1);
+        }
+      } else p.punching = false;
+
+      // Update facing
+      roomObj.state[1].facing = roomObj.state[1].x < roomObj.state[2].x ? 1 : -1;
+      roomObj.state[2].facing = roomObj.state[2].x < roomObj.state[1].x ? 1 : -1;
+
+      // Check round over
+      if(roomObj.state[1].hp === 0 || roomObj.state[2].hp === 0){
+        const winner = roomObj.state[1].hp === 0 ? 2 : 1;
+        roomObj.state.score[winner]++;
+        roomObj.state.round++;
+
+        // Reset positions and HP if match not over
+        if(roomObj.state.score[1] < 2 && roomObj.state.score[2] < 2){
+          roomObj.state[1].hp = 100; roomObj.state[1].x = 150; roomObj.state[1].punching=false;
+          roomObj.state[2].hp = 100; roomObj.state[2].x = 650; roomObj.state[2].punching=false;
+        }
+      }
+    }
+
+    // Broadcast state
+    const stateMsg = JSON.stringify({ type:"state", payload:roomObj.state });
+    roomObj.clients.forEach(c => {
+      if(c.readyState === WebSocket.OPEN) c.send(stateMsg);
+    });
   });
 
   ws.on("close", () => {
     console.log("Client disconnected");
-    rooms.forEach((clients, roomId) => {
-      clients.delete(ws);
-      if(clients.size === 0) rooms.delete(roomId);
+    rooms.forEach((roomObj, roomId) => {
+      roomObj.clients = roomObj.clients.filter(c => c !== ws);
+      if(roomObj.clients.length === 0) rooms.delete(roomId);
     });
   });
 });
 
-// ======================
-// START SERVER
-// ======================
-const PORT = process.env.PORT || 8080;
-server.listen(PORT, () => console.log(`Boxing server running on port ${PORT}`));
+server.listen(process.env.PORT || 8080, () => console.log("Server running"));
