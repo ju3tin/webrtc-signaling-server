@@ -6,7 +6,10 @@ const server = http.createServer((req, res) => {
   if (req.method === "GET") {
     if (req.url === "/") {
       res.writeHead(200, { "Content-Type": "text/plain" });
-      res.end("Page Working");
+      res.end(JSON.stringify({
+        websocketstatus: 'working',
+        greeting: 'hello world'
+      }));
       return;
     }
 
@@ -52,12 +55,40 @@ wss.on("connection", (ws) => {
 
     const { room, type, payload } = data;
 
-    if (!rooms.has(room)) rooms.set(room, new Set());
+    if (!room) {
+      ws.send(JSON.stringify({ type: "error", payload: "Room ID required" }));
+      return;
+    }
 
-    rooms.get(room).add(ws);
+    // Create room if it doesn't exist
+    if (!rooms.has(room)) {
+      rooms.set(room, new Set());
+    }
 
-    // Relay to other clients in the room
-    rooms.get(room).forEach(client => {
+    const clients = rooms.get(room);
+
+    // 🚫 Enforce 2-user limit
+    if (!clients.has(ws) && clients.size >= 2) {
+      ws.send(JSON.stringify({
+        type: "error",
+        payload: "Room is full (2 users max)"
+      }));
+      return;
+    }
+
+    // Add client to room if not already in
+    if (!clients.has(ws)) {
+      clients.add(ws);
+      ws.room = room;
+
+      ws.send(JSON.stringify({
+        type: "joined",
+        payload: { room }
+      }));
+    }
+
+    // Relay message to other client in room
+    clients.forEach(client => {
       if (client !== ws && client.readyState === WebSocket.OPEN) {
         client.send(JSON.stringify({ type, payload }));
       }
@@ -66,13 +97,20 @@ wss.on("connection", (ws) => {
 
   ws.on("close", () => {
     console.log("Client disconnected");
-    rooms.forEach((clients, room) => {
-      clients.delete(ws);
-      if (clients.size === 0) rooms.delete(room);
-    });
+
+    const room = ws.room;
+    if (!room) return;
+
+    const clients = rooms.get(room);
+    if (!clients) return;
+
+    clients.delete(ws);
+
+    if (clients.size === 0) {
+      rooms.delete(room);
+    }
   });
 });
-
 // Listen on port
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => console.log(`Signaling server running on port ${PORT}`));
