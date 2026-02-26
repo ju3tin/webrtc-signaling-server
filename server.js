@@ -99,6 +99,33 @@ wss.on("connection", (ws) => {
       return;
     }
 
+    if(data.type==="state"){
+      players = data.payload;
+    
+      if(!gameOver && players[1] && players[2]){
+    
+        if(players[1].hp <= 0 || players[2].hp <= 0){
+          gameOver = true;
+    
+          let winner;
+    
+          if(players[1].hp <= 0){
+            winner = 2;
+          } else {
+            winner = 1;
+          }
+    
+          console.log("🏆 Winner is Player", winner);
+    
+          if(myRole === winner){
+            winSound.play();
+          } else {
+            loseSound.play();
+          }
+        }
+      }
+    }
+
     // =========================
     // INPUT HANDLING
     // =========================
