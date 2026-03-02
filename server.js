@@ -6,6 +6,29 @@ const wss = new WebSocket.Server({ server });
 
 const rooms = new Map(); // roomId -> { clients: [], state }
 
+
+const server = http.createServer((req, res) => {
+  if (req.method === "GET") {
+    if (req.url === "/") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ status: "Server running" }));
+      return;
+    }
+    if (req.url === "/status") {
+      let roomCount = rooms.size;
+      let clientCount = 0;
+      rooms.forEach(clients => clientCount += clients.size);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ rooms: roomCount, clients: clientCount }));
+      return;
+    }
+  }
+
+  res.writeHead(404);
+  res.end("Not Found");
+});
+
+
 wss.on("connection", ws => {
   console.log("Client connected");
 
