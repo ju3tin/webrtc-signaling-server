@@ -1,13 +1,13 @@
 const WebSocket = require("ws");
 const http = require("http");
 
-// const server = http.createServer();
+const server = http.createServer();
 const wss = new WebSocket.Server({ server });
 
 const rooms = new Map(); // roomId -> { clients: [], state }
 
 
-const server = http.createServer((req, res) => {
+const server1 = http.createServer((req, res) => {
   if (req.method === "GET") {
     if (req.url === "/") {
       res.writeHead(200, { "Content-Type": "application/json" });
