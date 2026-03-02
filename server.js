@@ -1,7 +1,7 @@
 const WebSocket = require("ws");
 const http = require("http");
 
-const server = http.createServer();
+// const server = http.createServer();
 const wss = new WebSocket.Server({ server });
 
 const rooms = new Map(); // roomId -> { clients: [], state }
